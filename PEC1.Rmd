@@ -2,28 +2,39 @@
 title: "Informe PEC1"
 author: "Irati Bastero"
 date: "`r Sys.Date()`"
-output: pdf_document
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  markdown:
+    wrap: 72
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-##  Tabla de contenidos
 
-## Abstract
+## Objetivos del estudio. 
 
-## Objetivos del estudio. Debe de quedar bien claro cuáles son los objetivos de vuestro trabajo. Breves, media página a lo sumo.
+El objetivo de este PEC es realizar un análisis de datos ómicos (metabolómicos en este caso) y familiarizarse con los conceptos y herramientas trabajados hasta el momento en la asignatura. Los datos ómicos son una gran fuente de información que puede resultar muy útil pero difícil de explorar al mismo tiempo. Es necesario filtrar y examinar esta información empleando herramientas que faciliten el trabajo, como son los contenedores de datos ómicos, las herramientas de exploración de datos o los repositorios como github.
 
 
 ## Materiales y Métodos
 
-Con qué y cómo habéis trabajado. Variará según el caso, pero habitualmente contendrá: Origen (fuente) y naturaleza (tipo) de los datos; herramientas informáticas y bioinformáticas utilizadas. procedimiento general de análisis; métodos utilizados; Una o dos páginas como mucho.
+Para esta primera prueba de evaluación continua, he seleccionado el dataset de metabolómica "GastricCancer_NMR" descargado del repositorio de github proporcionado para la PEC.
 
+Este dataset proviene de un estudio que tenía como objetivo identificar si el cáncer gástrico (CG) tiene un perfil metabolómico urinario único en comparación con la enfermedad gástrica benigna (BN) y los pacientes sanos (HE). Para ello se analizó la orina de 43 pacientes con CG, 40 con BN y 40 con HE mediante espectroscopia de resonancia magnética nuclear 1H (1H-NMR), generando 77 metabolitos reproducibles (QC-RSD \<25%).
+La información sobre el proyecto puede encontrarse aquí: [1H-NMR urinary metabolomic profiling for diagnosis of gastric cancer](https://www.metabolomicsworkbench.org/data/DRCCMetadata.php?Mode=Project&ProjectID=PR000699)
+
+Las herramientas con las que he trabajado han sido Bioconductor y github. Me he basado también en el tutorial [Basic Metabolomics Data Analysis Workflow](https://cimcb.github.io/MetabWorkflowTutorial/Tutorial1.html) para el análisis exploratorio de datos.
 
 
 ## Resultados
 
+### Preparación de los datos
+
+En primer lugar, he instalado `SummarizedExperiment`desde Bioconductor
 
 ```{r, include=FALSE}
 if (!require("BiocManager", quietly = TRUE))
@@ -31,18 +42,21 @@ if (!require("BiocManager", quietly = TRUE))
 
 BiocManager::install("SummarizedExperiment")
 ```
+
 ```{r}
 library(SummarizedExperiment)
 ```
 
-
-En primer lugar, voy a acceder al archivo xlsx
+Después he accedido al archivo xlsx:
 ```{r}
 library(readxl)
 
 file <- "GastricCancer_NMR.xlsx"
 ```
 
+El fichero xlsx contiene dos hojas, "Data" y "Peak". A continuación, he
+cargado los datos de la hoja "Data" y he extraído las columnas con
+información sobre los tipos de muestra:
 ```{r}
 # Cargar datos de la hoja "Data"
 data <- read_excel(file, sheet = "Data", na = "NA")
@@ -59,6 +73,14 @@ rownames(colData) <- colData$SampleID
 head(colData)
 ```
 
+En este `Dataframe`, la columna `SampleType` indica si la muestra es una
+muestra de control de calidad o una muestra de estudio. Por otro lado,
+la columna `Class` indica el resultado clínico observado para ese
+individuo: GC = Cáncer gástrico , BN = Tumor benigno , HE = Control
+sano.
+
+A partir de la hoja "Data", también he creado una matriz con los datos
+cuantitativos:
 ```{r}
 # Crear la matriz de datos cuantitativos, seleccionando solo las columnas `M5` a `M149` de la hoja "Data"
 data_matrix_counts <- data[, 5:ncol(data)]
@@ -72,6 +94,11 @@ rownames(data_matrix_counts) <- data$SampleID
 head(data_matrix_counts)
 ```
 
+En esta matriz, cada fila describe una única muestra de orina, donde las
+columnas de M1 a M149 describen las concentraciones de metabolitos.
+
+Por otro lado, he extraído los datos de la hoja "Peak" y lo he
+convertido en `dataframe`:
 ```{r}
 # Cargar datos de la hoja "Peak"
 row_metadata <- read_excel(file, sheet = "Peak", na = "NA")
@@ -79,28 +106,44 @@ row_metadata <- read_excel(file, sheet = "Peak", na = "NA")
 # Asignar nombres de fila en `rowData` y convertir a `DataFrame`
 rowData <- DataFrame(row_metadata)
 rownames(rowData) <- row_metadata$Name  
+
 head(rowData)
 ```
 
+En el caso de este `DataFrame`, cada fila describe un único metabolito,
+donde: - `Idx` es un índice único de metabolito. - `Name` es la cabecera
+de columna correspondiente a este metabolito en la matriz de datos. -
+`Label` proporciona un nombre único para el metabolito (o un
+identificador uNNN) - La columna `Perc_missing` indica qué porcentaje de
+muestras no contienen una medición para este metabolito (datos que
+faltan). - Finalmente, la columna `QC_RSD` es una puntuación de calidad
+que representa la variación en las mediciones de este metabolito en
+todas las muestras.
+
+Siguiendo con la prepración de los datos, para evitar desajustes de
+dimensión entre `data_matrix_counts` y `colData`, compruebo sus
+dimensiones:
 ```{r}
-# Nos aseguramos de que el número de filas de data_matrix_counts coincide con el número de filas de colData para evitar desajustes de dimensión.
-dim(data_matrix_counts)  # should return (n_samples, n_features)
-dim(colData)     # should return (n_samples, n_metadata)
-dim(rowData)
+dim(data_matrix_counts)  
+dim(colData)     
 ```
 
+Voy a transponer la matriz de datos para que `data_matrix_counts` tenga
+las muestras como columnas y las características como filas:
 ```{r}
-#Transponerla matriz de datos para que data_matrix_counts tenga las muestras como columnas y las características como filas
 data_matrix_counts <- t(data_matrix_counts)
 ```
 
-
+Compruebo las dimensiones de nuevo:
 ```{r}
-# Comprobamos las dimensiones de nuevo
-dim(data_matrix_counts)  # Should now return (n_features, n_samples)
-dim(colData)             # Should return (n_samples, n_metadata)
+dim(data_matrix_counts)  # Ahora debería devolver (n_características, n_muestras)
+dim(colData) # Debería devolver (n_muestras, n_metadatos)
 ```
 
+### Creación del contenedor del tipo `SummarizedExperiment`
+
+Ahora que los datos están listos, voy a proceder a crear el contenedor
+`SummarizedExperiment` y a comprobar su estructura:
 ```{r}
 library(SummarizedExperiment)
 
@@ -115,52 +158,69 @@ se
 class(se)
 ```
 
+Podemos acceder a los datos cuantitativos de las muestras:
 ```{r}
 assays(se)$counts
 ```
 
+A través de **`assay_data`**, podemos ver también un resumen de algunos
+estadísticos para los datos del estudio según la muestra:
 ```{r}
 assay_data <- assay(se)
 summary(assay_data)
 ```
 
-Recuento de valores perdidos:
+Hacemos un recuento de valores perdidos:
 ```{r}
 sum(is.na(assay_data))
 ```
+
 ```{r}
 class(assay_data)
 ```
 
+Podemos ver los nombres de las columnas y filas de `assay_data`:
 ```{r}
 colnames(assay_data)
 rownames(assay_data)
 ```
 
-Exploramos **rowData** para comprender los metadatos de cada característica
+Exploramos **`rowData`** para comprender los metadatos de cada
+característica
 ```{r}
 rowData(se)
 ```
+
 ```{r}
 summary(rowData(se))
 ```
+
 Hacemos un recuento de valores perdidos:
 ```{r}
 sum(is.na(rowData(se)$Perc_missing))
 ```
 
-Exploramos **`colData`** para comprender los metadatos a nivel de muestra.
+Exploramos **`colData`** para comprender los metadatos a nivel de
+muestra.
 ```{r}
 colData(se)
 ```
+
 ```{r}
 summary(colData(se))
 ```
+
 Miramos qué tipo de muestras encontramos en el dataset:
 ```{r}
 table(colData(se)$SampleType)
+QC <- sum(colData(se)$SampleType == "QC")
+Sample <- sum(colData(se)$SampleType == "Sample")
 ```
-Observamos la distribución de las clases:
+
+Encontramos `r QC` muestras de tipo QC (control de calidad) y `r Sample`
+muestras de pacientes.
+
+Observamos también la distribución de las clases:
 ```{r}
 table(colData(se)$Class)
 ```
@@ -169,8 +229,10 @@ Exploramos el objeto `metadata` y observamos que está vacío:
 ```{r}
 metadata(se)
 ```
+
+Por ello, voy a crear una lista `metadata` con los datos del archivo
+`description(2).md`:
 ```{r}
-# Creamos una lista 'metadata'
 study_metadata <- list(
   description = "Dataset used in the CIMBC tutorial on Basic Metabolomics Data Analysis Workflow",
   citation = "Chan et al. (2016), British Journal of Cancer",
@@ -184,22 +246,224 @@ study_metadata <- list(
 metadata(se) <- study_metadata
 ```
 
-
+Ahora podemos visualizar la estructura y el contenido de 'metadata':
 ```{r}
-# Visualizamos la estructura y el contenido de 'metadata'
 str(se)
 metadata(se)
 ```
 
+### Guardar los datos 
+
+Ahora voy a proceder a guardar los datos del objeto
+`SummarizedExperiment`, extrayendo cada parte y guardándolos
+individualmente como archivos de texto:
+```{r}
+# 1. Guardar assay data
+write.table(assay_data, file = "assay_data.txt", sep = "\t", row.names = TRUE, col.names = TRUE, quote = FALSE)
+
+# 2. Guardar row data 
+write.table(rowData, file = "row_data.txt", sep = "\t", row.names = TRUE, col.names = TRUE, quote = FALSE)
+
+# 3. Guardar colData
+write.table(colData, file = "col_data.txt", sep = "\t", row.names = TRUE, col.names = TRUE, quote = FALSE)
+```
+
+Por último, para guardar el objeto `SummarizedExperiment`, incluyendo
+tanto los datos como los metadatos, en un archivo de formato binario
+.Rda, se puede utilizar la función save() de R:
+```{r}
+# Definir la ruta donde queremos guardar el archivo
+save_path <- "C:/Users/irati/OneDrive/Documentos/UOC/Análisis de datos ómicos/PEC1/BASTERO-Acha-Irati-PEC1/se_data.Rda"
+
+# Guardar el objeto SummarizedExperiment en la ruta especificada
+save(se, file = save_path)
+```
+
+### Análisis exploratorio
+
+A veces es necesario evaluar la calidad de los datos y eliminar (limpiar) los metabolitos mal medidos antes de realizar cualquier análisis. Para el conjunto de datos con el que estamos trabajando,
+ya se han calculado algunas estadísticas básicas para cada metabolito y se han almacenado en
+la tabla `Peak`. Vamos a guardar los metabolitos que cumplen los los siguientes criterios:
+
+- QC-RSD inferior al 20% 
+- Menos del 10% de los valores perdidos
+
+#### Paso 1: Filtrar metabolitos por QC-RSD y valores perdidos 
+
+Ahora vamos a filtrar los metadatos de `Peak` para obtener una lista de metabolitos aceptables y
+a continuación, creamos un subconjunto del conjunto de datos principal, `data_filtered`, que contiene sólo los metabolitos seleccionados junto con la información de la muestra:
+```{r}
+# Filtrar metabolitos según QC-RSD y valores ausentes
+peak_clean <- subset(row_metadata, QC_RSD < 20 & Perc_missing < 10)
+
+# Extraer los nombres de metabolitos que cumplen los criterios
+peaklist <- peak_clean$Name
+
+# Filtrar el conjunto de datos principal para incluir sólo los metabolitos seleccionados
+data_filtered <- data[, c("SampleID", "SampleType", "Class", peaklist)]
 
 
+nrow(data_filtered)
+ncol(data_filtered)
+```
 
+#### Paso 2: Imputación de valores perdidos con k-Nearest Neighbors (KNN)  
+
+Después del filtrado, es posible que aún queden algunos valores perdidos. Se puede utilizar el paquete `impute` en R para tratarlos con la imputación KNN.
+
+```{r, include=FALSE}
+# Usar BiocManager para instalar el paquete impute
+BiocManager::install("impute")
+```
+
+```{r}
+library(impute)
+
+# Extraer sólo las columnas de metabolitos para la imputación
+metabolite_data <- data_filtered[, peaklist]
+
+# Imputar valores perdidos mediante KNN (k = 3)
+imputed_data <- impute.knn(as.matrix(metabolite_data), k = 3)$data
+
+# Sustituir las columnas de metabolitos en data_filtered por los datos imputados
+data_filtered[, peaklist] <- imputed_data
+```
+
+Ahora, los datos imputados sustituyen a las columnas de metabolitos originales en `data_filtered`.
+ 
+#### Paso 3: Log Transform and Scale Data
+
+Para realizar una evaluación multivariante de la calidad del conjunto de datos filtrados haremos un análisis de Componentes Principales (PCA), después de una transformación y escalado adecuados. 
+
+En primer lugar, extraemos la matriz de datos de metabolitos y, una vez transformada y escalada se crea una nueva variable `peaklist`, para contener los nombres (M1...Mn) de los metabolitos que se utilizarán en el análisis estadístico posterior. Los datos `peak` de todas las muestras, correspondientes a esta lista, se extraen de la tabla `dataTable`, y se colocan en una matriz X. Los valores en X son log-transformados (Xlog).
+```{r}
+# Seleccionar sólo columnas de metabolitos para transformación y escalado
+metabolite_data <- data_filtered[, peaklist]
+
+# Transformación logarítmica y escalado estándar
+log_transformed <- log10(metabolite_data + 1)  # Add 1 to handle any zeros in the data
+scaled_data <- scale(log_transformed)
+```
+
+Ahora nos aseguramos de que `data_filtered$SampleType` coincide con las filas de `scaled_data`:
+```{r}
+# Comprobar dimensiones
+nrow(scaled_data)  # Debe coincidir con la longitud de SampleType
+length(data_filtered$SampleType)
+```
+
+#### Paso 4: Análisis de componentes principales
+
+El gráfico de puntuación del PCA suele estar etiquetado por tipo de muestra (es decir, control de calidad o muestra biológica).
+Los datos de alta calidad tendrán controles de calidad que se agrupan estrechamente en comparación con las muestras biológicas.
+```{r}
+# Cargar las librerías necesarias para PCA
+library(FactoMineR)
+library(factoextra)
+
+# Asegurarse de que SampleType es un factor y coincide con las filas de scaled_data
+sample_type <- factor(data_filtered$SampleType)
+
+# Ejecutar PCA
+pca_result <- PCA(scaled_data, graph = FALSE)
+
+# Visualizar PCA
+fviz_pca_ind(pca_result, 
+             label = "none", 
+             habillage = sample_type, 
+             palette = c("#00AFBB", "#E7B800"),
+             addEllipses = TRUE,
+             title = "PCA - Metabolomics Data by Sample Type")
+```
+
+Interpretando el resultado del análisis PCA a partir del gráfico, se puede observar que las muestras de control de calidad (en verde azulado) están muy agrupadas, lo que indica
+de que estas muestras son consistentes y tienen
+baja variabilidad. Esto sugiere que el proceso de control de calidad ha sido estable y que estas muestras son fiables.
+Las otras muestras (en amarillo) están más dispersas, lo que es habitual ya que
+muestras biológicas o de pacientes suelen mostrar una mayor variabilidad.
+
+El gráfico nos muestra que Dim1, el primer componente principal, explica el 40,1% de la varianza, mientras que Dim2 (segundo componente)
+explica el 7,3%. Combinados, estos dos componentes principales capturan el 47,4% de la varianza total del conjunto de datos. Se trata de una cantidad razonable para para datos metabolómicos, aunque podrían necesitarse más componentes para captar patrones complejos.
+
+##### Gráfico de dispersión
+
+Voy a realizar también un gráfico de dispersión, para visualizar cuánta varianza explica cada componente principal, lo que permitiría decidir el número óptimo de componentes para el análisis.
+
+```{r}
+fviz_eig(pca_result, addlabels = TRUE, ylim = c(0, 50))
+```
+
+Este gráfico muestra el porcentaje de varianza explicado por cada componente principal (CP).
+Podemos ver que el PC1 explica una parte sustancial de la varianza (40,1%), mientras que el PC2 explica el 7,3%, como ya hemos visto en el gráfico anterior. La pronunciada caída después de PC1 y el descenso gradual posterior indican que un pequeño número de componentes (la combinación de PC1 y PC2) capta la mayor parte de la varianza de los datos.
+
+##### Contribuciones de las variables al ACP (gráfico de carga)
+
+También podemos examinar las contribuciones de cada metabolito a los componentes principales:
+```{r}
+fviz_pca_var(pca_result, col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE, title = "PCA - Variable Contributions")
+
+```
+
+Este gráfico muestra las contribuciones de cada metabolito (etiquetado como M5, M7,etc.) a los dos primeros componentes principales (PC1 y PC2). El gradiente de color indica el nivel de contribución: el color naranja-rojo indica las contribuciones más altas y el azul-verde las más bajas. Las flechas más largas pueden interpretarse como metabolitos que tienen una mayor influencia en la varianza explicada por PC1 o PC2.
+
+
+#### Paso 5: Análisis discriminante de mínimos cuadrados parciales (PLS-DA) 
+Para realizar el PLS-DA, se puede emplear el paquete `mixOmics` de R:
+
+```{r, include=FALSE}
+if (!requireNamespace("mixOmics", quietly = TRUE)) {
+  install.packages("mixOmics")
+}
+```
+
+```{r}
+library(mixOmics)
+
+gc_he_data <- subset(data_filtered, Class %in% c("GC", "HE"))
+
+# Configurar datos y etiquetas para PLS-DA
+X <- as.matrix(scaled_data[data_filtered$Class %in% c("GC", "HE"), peaklist])
+Y <- factor(gc_he_data$Class, levels = c("HE", "GC"))  
+
+# Ejecutar PLS-DA con dos componentes
+plsda_result <- plsda(X, Y, ncomp = 2)
+
+# Visualizar los resultados PLS-DA
+plotIndiv(plsda_result, 
+          ind.names = FALSE, 
+          group = Y, 
+          ellipse = TRUE, 
+          title = "PLS-DA - GC vs HE")
+```
+
+En este gráfico, los ejes x e y representan los dos primeros componentes PLS (X-variable 1 y X-variable 2), que son combinaciones lineales de las variables originales optimizadas para la separación de grupos.  El porcentaje de varianza explicada en cada eje (30% para X-variate 1 y 21% para X-variate 2) indica qué parte de la variabilidad de los datos capturan estos componentes. Cuanto mayor sea el porcentaje, mayor será la parte de la estructura de datos que representan estos ejes.
+Por otro lado, hay dos grupos distintos en el gráfico, representados por formas y colores diferentes. Un grupo (por ejemplo, «GC») está representado por triángulos azules, y el otro (por ejemplo, «HE») por círculos naranjas.
+La separación entre los conglomerados sugiere que los dos grupos tienen perfiles diferentes en las variables utilizadas en este análisis. Esta distinción implica que el modelo PLS-DA encontró una separación significativa entre los dos grupos basándose en los datos subyacentes.
+Las elipses alrededor de cada grupo representan intervalos de confianza o regiones donde se espera que se sitúe la mayoría de los puntos de datos de cada grupo. Si las elipses se solapan, como se ve aquí, sugiere cierto grado de similitud o solapamiento entre los grupos, lo que significa que la separación no es perfecta. Sin embargo, la distinción general entre grupos sigue apoyando la separación de grupos.
+
+En conclusión, el análisis PLS-DA sugiere que existen diferencias discernibles entre los grupos «GC» y «HE», ya que en general están separados a lo largo de los ejes X-variate 1 y X-variate 2. Sin embargo, el solapamiento entre las elipses de confianza sugiere que, aunque existe cierta capacidad para diferenciar entre los grupos, la separación puede no ser lo suficientemente fuerte como para clasificar todas las muestras con precisión. Una investigación más profunda sobre componentes o variables adicionales podría ayudar a afinar la separación o a comprender las fuentes de solapamiento entre estos grupos.
+
+#### Paso 6: Importancia de las características (puntuaciones VIP)
+
+Para evaluar la importancia de las características en el modelo PLS-DA, se calculan las puntuaciones de Proyección (VIP), que destacan los metabolitos que más contribuyen al poder de discriminación del modelo.
+
+```{r}
+# Calcular VIP scores
+vip_scores <- vip(plsda_result)
+
+# Extraer las mejores características basandonos en las puntuaciones VIP
+top_features <- vip_scores[vip_scores > 1]
+top_features
+```
+Para comprender a qué metabolitos corresponden estas puntuaciones, deberíamos asignarlas a los metabolitos específicos (variables) del conjunto de datos. Esto se puede hacer asociando las puntuaciones VIP con los nombres de las características en la lista `Peak`. sin embargo, yo no he podido llegar más lejos en el análisis exploratorio.
 
 ## Discusión y limitaciones y conclusiones del estudio
 
+Con el análisis realizado hemos podido observar cómo están estructurados los datos y se puede obtener una idea de cómo se distribuyen, así como las contribuciones de cada metabolito a los componentes principales. Sin embargo, es necesario un análisis más extenso para poder comparar las diferencias en los perfiles entre individuos diagnosticados con cáncer gástrico o pacientes sanos.
 
+## Dirección del repositorio github
 
-
-
-
-
+A través del siguiente link se puede acceder a mi repositorio de github:
+[BASTERO-Acha-Irati-PEC1](https://github.com/iba09/BASTERO-Acha-Irati-PEC1)
